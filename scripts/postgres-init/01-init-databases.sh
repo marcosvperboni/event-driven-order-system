@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Read the secret directly from its mounted file instead of trusting that
+# $POSTGRES_PASSWORD (resolved by the entrypoint from POSTGRES_PASSWORD_FILE)
+# is still exported by the time init scripts run - on this stack it silently
+# came through empty, creating every app role with a blank password.
+POSTGRES_PASSWORD="$(cat /run/secrets/postgres_password)"
+
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     CREATE DATABASE orders_db;
     CREATE DATABASE payments_db;

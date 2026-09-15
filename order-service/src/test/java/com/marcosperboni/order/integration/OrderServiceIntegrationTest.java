@@ -91,4 +91,22 @@ class OrderServiceIntegrationTest {
 		assertThat(logs).isNotEmpty();
 		assertThat(logs.get(0).getEventType()).isEqualTo(KafkaTopics.ORDER_CREATED);
 	}
+
+	@Test
+	void getOrder_itemsAreAccessibleOutsideTheCreatingTransaction() {
+		UUID customerId = UUID.randomUUID();
+		List<OrderItem> items = List.of(
+				new OrderItem(UUID.randomUUID(), UUID.randomUUID(), "widget", 2, new BigDecimal("5.00")));
+
+		var created = orderService.createOrder(customerId, items);
+
+		// createOrder()'s @Transactional has already committed and closed by the time control
+		// returns here; a fresh, separate @Transactional(readOnly = true) read (as the REST
+		// controller performs on GET /api/orders/{id}) must still be able to read `items`
+		// without a LazyInitializationException, since open-in-view is disabled.
+		var reloaded = orderService.getOrder(created.getId());
+
+		assertThat(reloaded.getItems()).hasSize(1);
+		assertThat(reloaded.getItems().get(0).getProductName()).isEqualTo("widget");
+	}
 }

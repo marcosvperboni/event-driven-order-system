@@ -22,6 +22,8 @@ spring:
     consumer:
       group-id: order-service
       auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: com.marcosperboni.order.infrastructure.messaging.event
         spring.json.use.type.headers: false
