@@ -1,0 +1,195 @@
+name: event-driven-order-system
+
+networks:
+  order-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: eos-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eos_admin}
+      POSTGRES_DB: eos_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-15500}:5432"
+    networks:
+      - order-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eos_admin} -d eos_bootstrap"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: eos-redis
+    ports:
+      - "${REDIS_PORT:-16400}:6379"
+    networks:
+      - order-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: eos-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-19100}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - "${KAFKA_PORT:-19100}:9092"
+    networks:
+      - order-network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: eos-order-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: orders_db
+      DB_USER: orders_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SERVER_PORT: "8081"
+    secrets:
+      - postgres_password
+    ports:
+      - "${ORDER_SERVICE_PORT:-18110}:8081"
+    networks:
+      - order-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: eos-payment-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: payments_db
+      DB_USER: payments_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SERVER_PORT: "8082"
+    secrets:
+      - postgres_password
+    ports:
+      - "${PAYMENT_SERVICE_PORT:-18111}:8082"
+    networks:
+      - order-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    container_name: eos-inventory-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: inventory_db
+      DB_USER: inventory_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SERVER_PORT: "8083"
+    secrets:
+      - postgres_password
+    ports:
+      - "${INVENTORY_SERVICE_PORT:-18112}:8083"
+    networks:
+      - order-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: eos-notification-service
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: notifications_db
+      DB_USER: notifications_user
+      DB_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SERVER_PORT: "8084"
+    secrets:
+      - postgres_password
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-18113}:8084"
+    networks:
+      - order-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
